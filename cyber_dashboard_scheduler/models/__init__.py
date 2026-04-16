@@ -1,1 +1,1 @@
-"""Internal domain model package."""
+"""Package des modèles internes du domaine."""

@@ -1,1 +1,1 @@
-"""Shared helper package for cross-cutting utilities."""
+"""Package des utilitaires partagés."""

@@ -1,1 +1,1 @@
-"""Base package for the cyber dashboard scheduler."""
+"""Package principal du scheduler cyber-dashboard."""

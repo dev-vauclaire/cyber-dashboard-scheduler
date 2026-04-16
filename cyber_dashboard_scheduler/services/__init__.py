@@ -1,1 +1,1 @@
-"""Business service package for scheduler workflows."""
+"""Package des services métier du scheduler."""
