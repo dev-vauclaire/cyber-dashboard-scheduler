@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from cyber_dashboard_scheduler.models import Source
 from cyber_dashboard_scheduler.utils.normalization import (
+    optional_text,
     require_identifier,
     require_text,
     optional_float,
@@ -18,7 +19,7 @@ def normalize_ogo_waf_source(site_name_or_id: str) -> Source:
     return Source(
         sensor_type_code="waf",
         external_id=site_value,
-        name="OGO/WAF",
+        name=site_value,
         latitude=None,
         longitude=None,
         is_active=True,
@@ -29,7 +30,7 @@ def normalize_serenicity_sensor(payload: Mapping[str, Any]) -> Source:
     """Normalise une source Serenicity vers le format interne."""
     sensor_id = require_identifier(payload.get("id"), "id")
     sensor_type_code = require_text(payload.get("type_fk"), "type_fk").lower()
-    name = require_text(payload.get("full_name"), "full_name")
+    name = optional_text(payload.get("full_name")) or require_text(payload.get("name"), "name")
     status = require_text(payload.get("status"), "status").upper()
 
     return Source(
@@ -38,7 +39,7 @@ def normalize_serenicity_sensor(payload: Mapping[str, Any]) -> Source:
         name=name,
         latitude=optional_float(payload.get("latitude"), "latitude", -90.0, 90.0),
         longitude=optional_float(payload.get("longitude"), "longitude", -180.0, 180.0),
-        is_active=status == "CONNECTED",
+        is_active=_is_active_status(status),
     )
 
 
@@ -54,5 +55,9 @@ def normalize_lurio_source(payload: Mapping[str, Any]) -> Source:
         name=name,
         latitude=optional_float(payload.get("latitude"), "latitude", -90.0, 90.0),
         longitude=optional_float(payload.get("longitude"), "longitude", -180.0, 180.0),
-        is_active=status == "CONNECTED",
+        is_active=_is_active_status(status),
     )
+
+
+def _is_active_status(status: str) -> bool:
+    return status in {"CONNECTED", "ACTIVE"}

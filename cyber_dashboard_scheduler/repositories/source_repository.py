@@ -52,8 +52,7 @@ class SourceRepository:
                 name = EXCLUDED.name,
                 latitude = EXCLUDED.latitude,
                 longitude = EXCLUDED.longitude,
-                is_active = EXCLUDED.is_active,
-                updated_at = NOW()
+                is_active = EXCLUDED.is_active
             RETURNING external_id, name, latitude, longitude, is_active
         """
         params = (
