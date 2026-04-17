@@ -79,6 +79,26 @@ def _get_positive_float(name: str, default: float) -> float:
     return parsed_value
 
 
+def _get_positive_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+
+    try:
+        parsed_value = int(value)
+    except ValueError as exc:
+        raise ConfigurationError(
+            f"Valeur entière invalide pour la variable d'environnement {name} : {value}"
+        ) from exc
+
+    if parsed_value <= 0:
+        raise ConfigurationError(
+            f"La variable d'environnement {name} doit être un entier positif"
+        )
+
+    return parsed_value
+
+
 @dataclass(frozen=True, slots=True)
 class DatabaseSettings:
     """Paramètres de connexion à la base PostgreSQL."""
@@ -116,6 +136,7 @@ class Settings:
     limit_request_per_day: int
     log_level: str
     http_timeout_seconds: float
+    poll_safety_window_seconds: int
     ogo: OgoSettings
     serenicity: SerenicitySettings
 
@@ -135,6 +156,10 @@ class Settings:
             limit_request_per_day=_require_positive_int("LIMIT_REQUEST_PER_DAY"),
             log_level=_require_log_level("LOG_LEVEL"),
             http_timeout_seconds=_get_positive_float("HTTP_TIMEOUT_SECONDS", 10.0),
+            poll_safety_window_seconds=_get_positive_int(
+                "POLL_SAFETY_WINDOW_SECONDS",
+                300,
+            ),
             ogo=OgoSettings(
                 base_url=_require_env("OGO_BASE_URL"),
                 username=_require_env("OGO_USERNAME"),

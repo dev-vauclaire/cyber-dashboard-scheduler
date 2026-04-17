@@ -7,6 +7,7 @@ from .attack_normalization import (
     normalize_serenicity_sensor_flux,
 )
 from .inventory import InventoryRunResult, SourceInventoryService
+from .ogo_collection import OgoAttackCollectionResult, OgoAttackCollectionService
 from .source_normalization import (
     normalize_lurio_source,
     normalize_ogo_waf_source,
@@ -16,6 +17,8 @@ from .source_normalization import (
 __all__ = [
     "InventoryRunResult",
     "NormalizationError",
+    "OgoAttackCollectionResult",
+    "OgoAttackCollectionService",
     "SourceInventoryService",
     "normalize_lurio_report",
     "normalize_lurio_source",
