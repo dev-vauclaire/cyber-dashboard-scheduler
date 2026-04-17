@@ -7,7 +7,11 @@ from datetime import UTC, datetime
 import logging
 from typing import Any, Callable, Iterable, Mapping, TypeAlias
 
-from cyber_dashboard_scheduler.clients import ApiClientError, SerenicityApiClient
+from cyber_dashboard_scheduler.clients import (
+    ApiClientError,
+    SerenicityLurioClient,
+    SerenicitySensorClient,
+)
 from cyber_dashboard_scheduler.config import Settings
 from cyber_dashboard_scheduler.db import PostgresDatabase
 from cyber_dashboard_scheduler.models import Source
@@ -48,11 +52,13 @@ class SourceInventoryService:
         *,
         settings: Settings,
         database: PostgresDatabase,
-        serenicity_client: SerenicityApiClient,
+        lurio_client: SerenicityLurioClient,
+        sensor_client: SerenicitySensorClient,
     ) -> None:
         self._settings = settings
         self._database = database
-        self._serenicity_client = serenicity_client
+        self._lurio_client = lurio_client
+        self._sensor_client = sensor_client
 
     def run_once(self) -> InventoryRunResult:
         """Exécute un inventaire complet des sources une seule fois."""
@@ -169,7 +175,7 @@ class SourceInventoryService:
         endpoint = "GET /api/v1/lurios"
         result.endpoints_called.append(endpoint)
         try:
-            payloads = self._serenicity_client.list_lurios()
+            payloads = self._lurio_client.list_lurios()
         except ApiClientError as exc:
             result.source_errors += 1
             LOGGER.error("Échec de l'inventaire Lurio via %s : %s", endpoint, exc)
@@ -201,7 +207,7 @@ class SourceInventoryService:
         endpoint = "GET /api/v1/sensors"
         result.endpoints_called.append(endpoint)
         try:
-            payloads = self._serenicity_client.list_sensors()
+            payloads = self._sensor_client.list_sensors()
         except ApiClientError as exc:
             result.source_errors += 1
             LOGGER.error("Échec de l'inventaire Serenicity via %s : %s", endpoint, exc)

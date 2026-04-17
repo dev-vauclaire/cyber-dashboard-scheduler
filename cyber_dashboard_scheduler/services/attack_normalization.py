@@ -54,10 +54,6 @@ def normalize_serenicity_sensor_flux(
     if not to_bool(payload.get("toxic")):
         return None
 
-    direction = require_text(payload.get("dir"), "dir").upper()
-    if direction != "IN":
-        return None
-
     return Attack(
         sensor_type_code=source.sensor_type_code,
         source_external_id=source.external_id,

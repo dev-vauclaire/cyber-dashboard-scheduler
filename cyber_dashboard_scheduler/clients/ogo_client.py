@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 
 import requests
 
-from .serenicity_client import ApiClientError
+from .serenicity_base_client import ApiClientError
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,14 +130,7 @@ class OgoApiClient:
 
         if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
             raise ApiClientError("Format inattendu pour le champ items du journal OGO")
-
-        if total_pages == 0 and page_number == 0:
-            return {
-                "items": items,
-                "total_pages": total_pages,
-                "page_number": page_number,
-                "total_count": total_count,
-            }
+        
         if total_pages <= 0 or page_number <= 0:
             raise ApiClientError(
                 "La pagination du journal OGO est invalide pour une réponse non vide"
