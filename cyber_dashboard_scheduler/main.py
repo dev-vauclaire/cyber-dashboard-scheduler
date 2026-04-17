@@ -12,6 +12,7 @@ from cyber_dashboard_scheduler.clients import (
 from cyber_dashboard_scheduler.config import ConfigurationError, Settings
 from cyber_dashboard_scheduler.db import PostgresDatabase
 from cyber_dashboard_scheduler.services import (
+    LurioAttackCollectionService,
     OgoAttackCollectionService,
     SerenicitySensorAttackCollectionService,
     SourceInventoryService,
@@ -139,7 +140,30 @@ def main() -> int:
         detoxio_result.attacks_inserted,
         detoxio_result.attacks_ignored,
     )
-    LOGGER.info("Fin du scheduler après inventaire, test OGO et test Detoxio")
+
+    # Exécute un test de collecte Lurio une seule fois après l'inventaire.
+    lurio_collection_service = LurioAttackCollectionService(
+        settings=settings,
+        database=database,
+        lurio_client=lurio_client,
+    )
+    try:
+        lurio_result = lurio_collection_service.collect_once()
+    except Exception as exc:
+        LOGGER.error("Échec du test de collecte Lurio : %s", exc)
+        return 1
+
+    LOGGER.info(
+        "Test de collecte Lurio exécuté. sources=%s succes=%s erreurs=%s pages=%s lus=%s inserees=%s ignorees=%s",
+        lurio_result.sources_selected,
+        lurio_result.sources_succeeded,
+        lurio_result.source_errors,
+        lurio_result.pages_read,
+        lurio_result.reports_read,
+        lurio_result.attacks_inserted,
+        lurio_result.attacks_ignored,
+    )
+    LOGGER.info("Fin du scheduler après inventaire, test OGO, test Detoxio et test Lurio")
     return 0
 
 
