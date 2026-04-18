@@ -112,6 +112,11 @@ class SourceInventoryService:
         return result
 
     def _load_supported_sensor_type_codes(self) -> set[str]:
+        """Charge la liste des types de capteurs connus en base.
+
+        Returns:
+            L'ensemble des codes de capteurs supportés.
+        """
         with self._database.connection() as connection:
             repository = SensorTypeRepository(connection)
             return {sensor_type.code for sensor_type in repository.list_all()}
@@ -144,6 +149,14 @@ class SourceInventoryService:
         result: InventoryRunResult,
         seen_source_keys: set[SourceKey],
     ) -> None:
+        """Inventorie la source OGO/WAF issue de la configuration locale.
+
+        Args:
+            supported_sensor_types: Types de capteurs connus en base.
+            inventory_timestamp: Horodatage UTC de l'inventaire.
+            result: Agrégat de résultat à enrichir.
+            seen_source_keys: Clés de sources vues pendant l'inventaire.
+        """
         if "waf" not in supported_sensor_types:
             LOGGER.info("Type waf absent de sensor_types, source OGO/WAF ignorée")
             return
@@ -168,6 +181,14 @@ class SourceInventoryService:
         result: InventoryRunResult,
         seen_source_keys: set[SourceKey],
     ) -> None:
+        """Inventorie les lurios fournis par Serenicity.
+
+        Args:
+            supported_sensor_types: Types de capteurs connus en base.
+            inventory_timestamp: Horodatage UTC de l'inventaire.
+            result: Agrégat de résultat à enrichir.
+            seen_source_keys: Clés de sources vues pendant l'inventaire.
+        """
         if "lurio" not in supported_sensor_types:
             LOGGER.info("Type lurio absent de sensor_types, appel /api/v1/lurios ignoré")
             return
@@ -200,6 +221,14 @@ class SourceInventoryService:
         result: InventoryRunResult,
         seen_source_keys: set[SourceKey],
     ) -> None:
+        """Inventorie les capteurs Serenicity.
+
+        Args:
+            supported_sensor_types: Types de capteurs connus en base.
+            inventory_timestamp: Horodatage UTC de l'inventaire.
+            result: Agrégat de résultat à enrichir.
+            seen_source_keys: Clés de sources vues pendant l'inventaire.
+        """
         if not supported_sensor_types or "detoxio" not in supported_sensor_types:
             LOGGER.info("Aucun type Serenicity supporté dans sensor_types, appel /api/v1/sensors ignoré")
             return
@@ -235,6 +264,17 @@ class SourceInventoryService:
         origin: str,
         seen_source_keys: set[SourceKey],
     ) -> None:
+        """Normalise puis persiste une série de payloads de sources.
+
+        Args:
+            payloads: Payloads bruts à traiter.
+            normalizer: Fonction de normalisation à appliquer.
+            supported_sensor_types: Types de capteurs connus en base.
+            inventory_timestamp: Horodatage UTC de l'inventaire.
+            result: Agrégat de résultat à enrichir.
+            origin: Libellé métier de l'origine des données.
+            seen_source_keys: Clés de sources vues pendant l'inventaire.
+        """
         for payload in payloads:
             result.sources_detected += 1
             try:
@@ -280,6 +320,14 @@ class SourceInventoryService:
         result: InventoryRunResult,
         origin: str,
     ) -> None:
+        """Persistе une source et son ``scheduler_state`` associé.
+
+        Args:
+            source: Source à enregistrer.
+            inventory_timestamp: Horodatage UTC de l'inventaire.
+            result: Agrégat de résultat à enrichir.
+            origin: Libellé métier de l'origine des données.
+        """
         try:
             with self._database.transaction() as connection:
                 source_repository = SourceRepository(connection)
@@ -326,6 +374,14 @@ class SourceInventoryService:
         inventory_timestamp: datetime,
         result: InventoryRunResult,
     ) -> None:
+        """Désactive les sources anciennement actives non revues à l'inventaire.
+
+        Args:
+            active_sources_before_inventory: Sources actives avant inventaire.
+            seen_source_keys: Clés des sources revues pendant l'inventaire.
+            inventory_timestamp: Horodatage UTC de l'inventaire.
+            result: Agrégat de résultat à enrichir.
+        """
         missing_sources = [
             source
             for source_key, source in active_sources_before_inventory.items()
@@ -392,6 +448,13 @@ class SourceInventoryService:
         inventory_timestamp: datetime,
         error_message: str,
     ) -> None:
+        """Enregistre un état d'erreur d'inventaire pour une source connue.
+
+        Args:
+            source: Source en erreur.
+            inventory_timestamp: Horodatage UTC de l'inventaire.
+            error_message: Message d'erreur à tronquer puis stocker.
+        """
         try:
             with self._database.transaction() as connection:
                 scheduler_state_repository = SchedulerStateRepository(connection)

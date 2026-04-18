@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from psycopg import Connection
 
 from cyber_dashboard_scheduler.models import SchedulerState, Source
+from cyber_dashboard_scheduler.utils import from_database_timestamp, to_database_timestamp
 
 
 class SchedulerStateRepository:
@@ -88,10 +89,10 @@ class SchedulerStateRepository:
         """
         params = (
             source_id,
-            _to_database_timestamp(last_inventory_at),
-            _to_database_timestamp(last_poll_at),
-            _to_database_timestamp(last_success_at),
-            _to_database_timestamp(last_error_at),
+            to_database_timestamp(last_inventory_at),
+            to_database_timestamp(last_poll_at),
+            to_database_timestamp(last_success_at),
+            to_database_timestamp(last_error_at),
             last_error_message,
         )
         with self._connection.cursor() as cursor:
@@ -110,6 +111,19 @@ class SchedulerStateRepository:
         external_id: str,
         raise_if_missing: bool,
     ) -> int | None:
+        """Résout l'identifiant d'une source pour les opérations d'état.
+
+        Args:
+            sensor_type_code: Code métier du type de capteur.
+            external_id: Identifiant externe de la source.
+            raise_if_missing: Indique s'il faut lever une erreur si la source est absente.
+
+        Returns:
+            L'identifiant ``sources.id`` ou ``None`` si autorisé.
+
+        Raises:
+            ValueError: Si la source est absente et que ``raise_if_missing`` vaut ``True``.
+        """
         query = """
             SELECT s.id
             FROM sources AS s
@@ -133,28 +147,19 @@ class SchedulerStateRepository:
 
     @staticmethod
     def _map_row(row: dict) -> SchedulerState:
+        """Convertit une ligne SQL en modèle applicatif UTC.
+
+        Args:
+            row: Ligne brute renvoyée par psycopg.
+
+        Returns:
+            L'état applicatif associé.
+        """
         return SchedulerState(
             source_id=row["source_id"],
-            last_inventory_at=_from_database_timestamp(row["last_inventory_at"]),
-            last_poll_at=_from_database_timestamp(row["last_poll_at"]),
-            last_success_at=_from_database_timestamp(row["last_success_at"]),
-            last_error_at=_from_database_timestamp(row["last_error_at"]),
+            last_inventory_at=from_database_timestamp(row["last_inventory_at"]),
+            last_poll_at=from_database_timestamp(row["last_poll_at"]),
+            last_success_at=from_database_timestamp(row["last_success_at"]),
+            last_error_at=from_database_timestamp(row["last_error_at"]),
             last_error_message=row["last_error_message"],
         )
-
-
-def _to_database_timestamp(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-
-    normalized_value = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    normalized_value = normalized_value.astimezone(UTC)
-    return normalized_value.replace(tzinfo=None)
-
-
-def _from_database_timestamp(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is not None:
-        return value.astimezone(UTC)
-    return value.replace(tzinfo=UTC)

@@ -90,6 +90,16 @@ def normalize_lurio_report(
 
 
 def _require_source_type(source: Source, expected_code: str, function_name: str) -> None:
+    """Vérifie qu'une source correspond bien au type attendu.
+
+    Args:
+        source: Source à valider.
+        expected_code: Code attendu.
+        function_name: Nom de la fonction appelante pour le message d'erreur.
+
+    Raises:
+        NormalizationError: Si le type de source ne correspond pas.
+    """
     if source.sensor_type_code.lower() != expected_code:
         raise NormalizationError(
             f"{function_name} attend une source de type {expected_code}, "
@@ -98,6 +108,14 @@ def _require_source_type(source: Source, expected_code: str, function_name: str)
 
 
 def _optional_source_event_id(*payloads: Mapping[str, Any]) -> str | None:
+    """Extrait un identifiant d'événement optionnel depuis plusieurs payloads.
+
+    Args:
+        *payloads: Payloads à inspecter dans l'ordre de priorité.
+
+    Returns:
+        Le premier identifiant non vide trouvé, sinon ``None``.
+    """
     for payload in payloads:
         for key in ("id", "event_id", "uid"):
             value = payload.get(key)

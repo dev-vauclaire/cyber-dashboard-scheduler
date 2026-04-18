@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
 import math
 import time
+from typing import Any
 
 from cyber_dashboard_scheduler.config import Settings
 from cyber_dashboard_scheduler.db import PostgresDatabase
@@ -18,6 +20,23 @@ from .serenicity_sensor_collection import SerenicitySensorAttackCollectionServic
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class CycleMetrics:
+    """Métriques consolidées d'un cycle de collecte.
+
+    Attributes:
+        sources_processed: Nombre de sources traitées pendant le cycle.
+        attacks_read: Nombre total d'attaques ou événements lus.
+        attacks_inserted: Nombre total d'attaques insérées.
+        attacks_ignored: Nombre total d'attaques ignorées.
+    """
+
+    sources_processed: int = 0
+    attacks_read: int = 0
+    attacks_inserted: int = 0
+    attacks_ignored: int = 0
 
 
 class SchedulerRuntimeService:
@@ -33,6 +52,16 @@ class SchedulerRuntimeService:
         sensor_collection_service: SerenicitySensorAttackCollectionService,
         lurio_collection_service: LurioAttackCollectionService,
     ) -> None:
+        """Construit le service d'orchestration principal du scheduler.
+
+        Args:
+            settings: Configuration applicative.
+            database: Accès PostgreSQL.
+            inventory_service: Service d'inventaire initial.
+            ogo_collection_service: Collecteur OGO.
+            sensor_collection_service: Collecteur Serenicity capteurs.
+            lurio_collection_service: Collecteur Lurio.
+        """
         self._settings = settings
         self._database = database
         self._inventory_service = inventory_service
@@ -99,6 +128,7 @@ class SchedulerRuntimeService:
 
         collectors_succeeded = 0
         collectors_failed = 0
+        metrics = CycleMetrics()
 
         for collector_name, collector in (
             ("OGO", self._ogo_collection_service.collect_once),
@@ -106,11 +136,18 @@ class SchedulerRuntimeService:
             ("Lurio", self._lurio_collection_service.collect_once),
         ):
             try:
-                collector()
+                collector_result = collector()
                 collectors_succeeded += 1
+                metrics = self._merge_cycle_metrics(
+                    metrics,
+                    self._extract_cycle_metrics(
+                        collector_name=collector_name,
+                        collector_result=collector_result,
+                    ),
+                )
             except Exception as exc:
                 collectors_failed += 1
-                LOGGER.error(
+                LOGGER.exception(
                     "Échec du collecteur %s pendant le cycle #%s : %s",
                     collector_name,
                     cycle_number,
@@ -119,10 +156,69 @@ class SchedulerRuntimeService:
 
         ended_at = datetime.now(UTC)
         LOGGER.info(
-            "Fin du cycle de collecte #%s à %s. collecteurs_ok=%s collecteurs_en_erreur=%s duree=%.2fs",
+            "Fin du cycle de collecte #%s à %s. collecteurs_ok=%s collecteurs_en_erreur=%s duree_cycle=%.2fs sources_traitees=%s attaques_lues=%s attaques_inserees=%s attaques_ignorees=%s",
             cycle_number,
             ended_at.isoformat(),
             collectors_succeeded,
             collectors_failed,
             (ended_at - started_at).total_seconds(),
+            metrics.sources_processed,
+            metrics.attacks_read,
+            metrics.attacks_inserted,
+            metrics.attacks_ignored,
+        )
+
+    @staticmethod
+    def _merge_cycle_metrics(left: CycleMetrics, right: CycleMetrics) -> CycleMetrics:
+        """Additionne deux jeux de métriques de cycle.
+
+        Args:
+            left: Premier jeu de métriques.
+            right: Second jeu de métriques.
+
+        Returns:
+            Les métriques cumulées.
+        """
+        return CycleMetrics(
+            sources_processed=left.sources_processed + right.sources_processed,
+            attacks_read=left.attacks_read + right.attacks_read,
+            attacks_inserted=left.attacks_inserted + right.attacks_inserted,
+            attacks_ignored=left.attacks_ignored + right.attacks_ignored,
+        )
+
+    @staticmethod
+    def _extract_cycle_metrics(*, collector_name: str, collector_result: Any) -> CycleMetrics:
+        """Projette le résultat d'un collecteur vers un format de métriques commun.
+
+        Args:
+            collector_name: Nom du collecteur pour les collecteurs mono-source.
+            collector_result: Dataclass résultat renvoyée par le collecteur.
+
+        Returns:
+            Les métriques consolidées exploitables au niveau d'un cycle.
+        """
+        sources_processed = getattr(collector_result, "sources_selected", None)
+        if sources_processed is None:
+            sources_processed = 1 if collector_name == "OGO" else 0
+
+        attacks_read = 0
+        for field_name in ("events_read", "fluxes_read", "reports_read"):
+            field_value = getattr(collector_result, field_name, None)
+            if field_value is not None:
+                attacks_read = field_value
+                break
+
+        return CycleMetrics(
+            sources_processed=sources_processed,
+            attacks_read=attacks_read,
+            attacks_inserted=getattr(
+                collector_result,
+                "events_inserted",
+                getattr(collector_result, "attacks_inserted", 0),
+            ),
+            attacks_ignored=getattr(
+                collector_result,
+                "events_ignored",
+                getattr(collector_result, "attacks_ignored", 0),
+            ),
         )

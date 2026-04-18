@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from hashlib import sha256
 
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
 from cyber_dashboard_scheduler.models import Attack
+from cyber_dashboard_scheduler.utils import ensure_utc_datetime, to_database_timestamp
 
 
 class AttackRepository:
@@ -49,8 +50,8 @@ class AttackRepository:
             source_id,
             attack.source_event_id,
             attack.attacker_ip,
-            _to_database_timestamp(attack.occured_at),
-            _to_database_timestamp(attack.collected_at),
+            to_database_timestamp(attack.occured_at),
+            to_database_timestamp(attack.collected_at),
             attack.attack_type,
             Jsonb(attack.raw_payload) if attack.raw_payload is not None else None,
         )
@@ -61,6 +62,18 @@ class AttackRepository:
         return row is not None
 
     def _resolve_source_id(self, *, sensor_type_code: str, external_id: str) -> int:
+        """Retourne l'identifiant technique d'une source déjà persistée.
+
+        Args:
+            sensor_type_code: Code fonctionnel du type de capteur.
+            external_id: Identifiant externe de la source.
+
+        Returns:
+            L'identifiant ``sources.id`` correspondant.
+
+        Raises:
+            ValueError: Si la source n'existe pas en base.
+        """
         query = """
             SELECT s.id
             FROM sources AS s
@@ -87,15 +100,16 @@ def _build_deduplication_id(
     attacker_ip: str,
     occured_at: datetime,
 ) -> str:
-    normalized_occured_at = (
-        occured_at if occured_at.tzinfo is not None else occured_at.replace(tzinfo=UTC)
-    )
-    occured_at_utc = normalized_occured_at.astimezone(UTC).isoformat()
+    """Construit la clé idempotente alignée avec les règles d'unicité métier.
+
+    Args:
+        source_id: Identifiant interne de la source.
+        attacker_ip: Adresse IP attaquante normalisée.
+        occured_at: Date métier de l'attaque.
+
+    Returns:
+        Un hash SHA-256 stable.
+    """
+    occured_at_utc = ensure_utc_datetime(occured_at).isoformat()
     digest = sha256(f"{source_id}|{attacker_ip}|{occured_at_utc}".encode("utf-8"))
     return digest.hexdigest()
-
-
-def _to_database_timestamp(value: datetime) -> datetime:
-    normalized_value = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    normalized_value = normalized_value.astimezone(UTC)
-    return normalized_value.replace(tzinfo=None)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 import logging
 
 from cyber_dashboard_scheduler.clients import OgoApiClient
@@ -16,6 +16,11 @@ from cyber_dashboard_scheduler.repositories import (
     SourceRepository,
 )
 from cyber_dashboard_scheduler.services.attack_normalization import normalize_ogo_attack
+from cyber_dashboard_scheduler.services.collection_common import (
+    build_collection_window,
+    persist_collection_error,
+    persist_collection_success,
+)
 from cyber_dashboard_scheduler.utils import NormalizationError
 
 
@@ -45,61 +50,83 @@ class OgoAttackCollectionService:
         database: PostgresDatabase,
         ogo_client: OgoApiClient,
     ) -> None:
+        """Construit le service de collecte OGO.
+
+        Args:
+            settings: Configuration applicative du scheduler.
+            database: Accès PostgreSQL.
+            ogo_client: Client HTTP OGO.
+        """
         self._settings = settings
         self._database = database
         self._ogo_client = ogo_client
 
     def collect_once(self) -> OgoAttackCollectionResult:
-        """Collecte les attaques OGO pour la source WAF active configurée."""
-        
-        # Récupère la source OGO/WAF active et l'état de collecte actuel en base
+        """Collecte les attaques OGO pour la source WAF active configurée.
+
+        Returns:
+            Le résumé de la collecte OGO.
+
+        Raises:
+            Exception: Relance toute erreur après mise à jour de ``scheduler_state``.
+        """
         source = self._load_active_ogo_source()
         current_state = self._load_scheduler_state(source)
-
-        before = datetime.now(UTC)
-        after = self._compute_after(before=before, current_state=current_state)
+        collection_window = build_collection_window(
+            before=datetime.now(UTC),
+            current_state=current_state,
+            safety_window_seconds=self._settings.poll_safety_window_seconds,
+        )
 
         LOGGER.info(
-            "Début de la collecte OGO pour %s. Fenêtre after=%s before=%s",
+            "Collecte OGO démarrée source=%s after=%s before=%s",
             source.external_id,
-            after.isoformat(),
-            before.isoformat(),
+            collection_window.after.isoformat(),
+            collection_window.before.isoformat(),
         )
 
         try:
             fetch_result = self._ogo_client.list_security_events(
-                after=after,
-                before=before,
+                after=collection_window.after,
+                before=collection_window.before,
             )
             result = self._persist_attacks(
                 source=source,
                 current_state=current_state,
-                after=after,
-                before=before,
+                after=collection_window.after,
+                before=collection_window.before,
                 pages_read=fetch_result.pages_read,
                 payloads=fetch_result.items,
             )
         except Exception as exc:
             self._record_collection_error(source=source, current_state=current_state, error=exc)
-            LOGGER.error(
-                "Échec de la collecte OGO pour %s : %s",
+            LOGGER.exception(
+                "Collecte OGO en erreur source=%s: %s",
                 source.external_id,
                 exc,
             )
             raise
        
         LOGGER.info(
-            "Collecte OGO terminée pour %s. lus=%s inserees=%s ignorees=%s pages=%s",
+            "Collecte OGO terminée source=%s pages=%s lus=%s inserees=%s ignorees=%s",
             result.source_external_id,
+            result.pages_read,
             result.events_read,
             result.events_inserted,
             result.events_ignored,
-            result.pages_read,
         )
         return result
     
 
     def _load_active_ogo_source(self) -> Source:
+        """Charge l'unique source OGO/WAF active configurée.
+
+        Returns:
+            La source OGO active.
+
+        Raises:
+            RuntimeError: Si la source attendue n'est pas présente en base.
+        """
         with self._database.connection() as connection:
             source_repository = SourceRepository(connection)
             active_sources = source_repository.list_active()
@@ -115,41 +142,17 @@ class OgoAttackCollectionService:
         )
 
     def _load_scheduler_state(self, source: Source) -> SchedulerState | None:
+        """Charge l'état courant du scheduler pour une source.
+
+        Args:
+            source: Source dont il faut lire l'état.
+
+        Returns:
+            L'état courant ou ``None``.
+        """
         with self._database.connection() as connection:
             scheduler_state_repository = SchedulerStateRepository(connection)
             return scheduler_state_repository.get_by_source(source)
-
-    def _compute_after(
-        self,
-        *,
-        before: datetime,
-        current_state: SchedulerState | None,
-    ) -> datetime:
-        """
-        Calcule la borne 'after' pour la récupération des événements.
-        Règles :
-        - Si on a un last_poll_at → on repart de là
-        - Sinon → on remonte à 24h dans le passé
-        - On applique une safety window pour éviter les pertes de données
-        - On garantit que 'after' reste strictement avant 'before'
-        """
-
-        safety_window = timedelta(seconds=self._settings.poll_safety_window_seconds)
-
-        # 1. Déterminer le point de départ de base
-        if current_state and current_state.last_poll_at:
-            base_after = current_state.last_poll_at
-        else:
-            base_after = before - timedelta(hours=24)
-
-        # 2. Appliquer la safety window (on remonte un peu dans le passé)
-        after = base_after - safety_window
-
-        # 3. Sécurité : éviter que 'after' dépasse 'before'
-        if after > before:
-            after = before - safety_window
-
-        return after
 
     def _persist_attacks(
         self,
@@ -161,6 +164,19 @@ class OgoAttackCollectionService:
         pages_read: int,
         payloads: list[dict],
     ) -> OgoAttackCollectionResult:
+        """Normalise puis insère les attaques OGO avant d'enregistrer le succès.
+
+        Args:
+            source: Source OGO collectée.
+            current_state: État courant de la source.
+            after: Borne basse collectée.
+            before: Borne haute collectée.
+            pages_read: Nombre de pages lues côté API.
+            payloads: Événements bruts retournés par OGO.
+
+        Returns:
+            Le résumé de persistance de la collecte.
+        """
         events_inserted = 0
         events_ignored = 0
         success_timestamp = datetime.now(UTC)
@@ -176,8 +192,13 @@ class OgoAttackCollectionService:
                         payload,
                         collected_at=success_timestamp,
                     )
-                except NormalizationError:
+                except NormalizationError as exc:
                     events_ignored += 1
+                    LOGGER.warning(
+                        "Attaque OGO ignorée source=%s raison=%s",
+                        source.external_id,
+                        exc,
+                    )
                     continue
 
                 if attack is None:
@@ -189,13 +210,12 @@ class OgoAttackCollectionService:
                 else:
                     events_ignored += 1
 
-            scheduler_state_repository.upsert(
-                source,
-                last_inventory_at=current_state.last_inventory_at if current_state else None,
-                last_poll_at=before,
-                last_success_at=success_timestamp,
-                last_error_at=None,
-                last_error_message=None,
+            persist_collection_success(
+                scheduler_state_repository,
+                source=source,
+                current_state=current_state,
+                before=before,
+                success_timestamp=success_timestamp,
             )
 
         return OgoAttackCollectionResult(
@@ -215,16 +235,21 @@ class OgoAttackCollectionService:
         current_state: SchedulerState | None,
         error: Exception,
     ) -> None:
+        """Persistе un échec de collecte OGO dans ``scheduler_state``.
+
+        Args:
+            source: Source en erreur.
+            current_state: État courant connu.
+            error: Exception à historiser.
+        """
         try:
             with self._database.transaction() as connection:
                 scheduler_state_repository = SchedulerStateRepository(connection)
-                scheduler_state_repository.upsert(
-                    source,
-                    last_inventory_at=current_state.last_inventory_at if current_state else None,
-                    last_poll_at=current_state.last_poll_at if current_state else None,
-                    last_success_at=current_state.last_success_at if current_state else None,
-                    last_error_at=datetime.now(UTC),
-                    last_error_message=str(error)[:1000],
+                persist_collection_error(
+                    scheduler_state_repository,
+                    source=source,
+                    current_state=current_state,
+                    error=error,
                 )
         except Exception as exc:
             LOGGER.warning(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from .serenicity_base_client import ApiClientError, SerenicityBaseClient
@@ -22,9 +22,16 @@ class SerenicityLurioClient(SerenicityBaseClient):
     """Expose les endpoints Serenicity nécessaires aux lurios."""
 
     def list_lurios(self) -> list[dict[str, Any]]:
-        """Récupère les lurios depuis Serenicity."""
+        """Récupère les lurios depuis Serenicity.
+
+        Returns:
+            La liste brute des lurios.
+
+        Raises:
+            ApiClientError: Si l'appel réseau ou le format de réponse échoue.
+        """
         payload = self._request_json("/lurios")
-        return self._extract_items(payload, endpoint="/lurios")
+        return self._extract_items(payload, endpoint="/lurios", resource_name="lurios")
 
     def list_lurio_reports(
         self,
@@ -33,7 +40,19 @@ class SerenicityLurioClient(SerenicityBaseClient):
         from_datetime: datetime,
         to_datetime: datetime,
     ) -> SerenicityLurioReportFetchResult:
-        """Lit toutes les pages de reports d'un lurio Serenicity."""
+        """Lit toutes les pages de reports d'un lurio Serenicity.
+
+        Args:
+            lurio_id: Identifiant du lurio ciblé.
+            from_datetime: Borne basse UTC incluse.
+            to_datetime: Borne haute UTC.
+
+        Returns:
+            Le résultat agrégé contenant toutes les pages lues.
+
+        Raises:
+            ApiClientError: Si une page de réponse est invalide.
+        """
         page_number = 1
         pages_read = 0
         items: list[dict[str, Any]] = []
@@ -43,8 +62,8 @@ class SerenicityLurioClient(SerenicityBaseClient):
             payload = self._request_json(
                 f"/lurios/{lurio_id}/reports",
                 params={
-                    "from": _format_serenicity_datetime(from_datetime),
-                    "to": _format_serenicity_datetime(to_datetime),
+                    "from": self._format_datetime(from_datetime),
+                    "to": self._format_datetime(to_datetime),
                     "page": page_number,
                 },
             )
@@ -64,32 +83,18 @@ class SerenicityLurioClient(SerenicityBaseClient):
         )
 
     @staticmethod
-    def _extract_items(payload: Any, *, endpoint: str) -> list[dict[str, Any]]:
-        if isinstance(payload, list):
-            if all(isinstance(item, dict) for item in payload):
-                return payload
-            raise ApiClientError(
-                f"Format inattendu pour l'endpoint Serenicity {endpoint}: liste invalide"
-            )
-
-        if isinstance(payload, dict):
-            for key in ("data", "items", "results"):
-                value = payload.get(key)
-                if isinstance(value, list):
-                    if all(isinstance(item, dict) for item in value):
-                        return value
-                    raise ApiClientError(
-                        f"Format inattendu pour l'endpoint Serenicity {endpoint}: "
-                        f"contenu invalide dans {key}"
-                    )
-
-        raise ApiClientError(
-            f"Format inattendu pour l'endpoint Serenicity {endpoint}: "
-            "liste de lurios introuvable"
-        )
-
-    @staticmethod
     def _parse_report_page_payload(payload: Any) -> dict[str, Any]:
+        """Valide la structure paginée d'une réponse de reports Lurio.
+
+        Args:
+            payload: Corps JSON brut.
+
+        Returns:
+            Un dictionnaire homogène contenant les items et la pagination.
+
+        Raises:
+            ApiClientError: Si la réponse n'a pas le format attendu.
+        """
         if not isinstance(payload, dict):
             raise ApiClientError("Format inattendu pour la réponse de report Lurio")
 
@@ -101,9 +106,21 @@ class SerenicityLurioClient(SerenicityBaseClient):
         if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
             raise ApiClientError("Format inattendu pour data dans la réponse Lurio")
 
-        current_page = _parse_non_negative_int(meta.get("current_page", 1), "current_page")
-        last_page = _parse_non_negative_int(meta.get("last_page", 1), "last_page")
-        total_count = _parse_non_negative_int(meta.get("total", 0), "total")
+        current_page = SerenicityBaseClient._parse_non_negative_int(
+            meta.get("current_page", 1),
+            "current_page",
+            "Lurio",
+        )
+        last_page = SerenicityBaseClient._parse_non_negative_int(
+            meta.get("last_page", 1),
+            "last_page",
+            "Lurio",
+        )
+        total_count = SerenicityBaseClient._parse_non_negative_int(
+            meta.get("total", 0),
+            "total",
+            "Lurio",
+        )
 
         if not items and current_page in {0, 1} and last_page in {0, 1}:
             return {
@@ -122,24 +139,3 @@ class SerenicityLurioClient(SerenicityBaseClient):
             "last_page": last_page,
             "total_count": total_count,
         }
-
-
-def _format_serenicity_datetime(value: datetime) -> str:
-    """Formate une date en UTC pour les appels Serenicity."""
-    normalized_value = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    return normalized_value.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _parse_non_negative_int(value: Any, field_name: str) -> int:
-    try:
-        parsed_value = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ApiClientError(
-            f"Valeur entière invalide dans la réponse Lurio : {field_name}"
-        ) from exc
-
-    if parsed_value < 0:
-        raise ApiClientError(
-            f"Valeur entière positive ou nulle attendue dans la réponse Lurio : {field_name}"
-        )
-    return parsed_value

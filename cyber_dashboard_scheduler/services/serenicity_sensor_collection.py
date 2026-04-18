@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 import logging
 
 from cyber_dashboard_scheduler.clients import SerenicitySensorClient
@@ -17,6 +17,11 @@ from cyber_dashboard_scheduler.repositories import (
 )
 from cyber_dashboard_scheduler.services.attack_normalization import (
     normalize_serenicity_sensor_flux,
+)
+from cyber_dashboard_scheduler.services.collection_common import (
+    build_collection_window,
+    persist_collection_error,
+    persist_collection_success,
 )
 from cyber_dashboard_scheduler.utils import NormalizationError
 
@@ -47,12 +52,23 @@ class SerenicitySensorAttackCollectionService:
         database: PostgresDatabase,
         sensor_client: SerenicitySensorClient,
     ) -> None:
+        """Construit le service de collecte Serenicity pour les capteurs.
+
+        Args:
+            settings: Configuration applicative du scheduler.
+            database: Accès PostgreSQL.
+            sensor_client: Client HTTP Serenicity pour les capteurs.
+        """
         self._settings = settings
         self._database = database
         self._sensor_client = sensor_client
 
     def collect_once(self) -> SerenicitySensorAttackCollectionResult:
-        """Collecte une fois les flux Detoxio pour toutes les sources actives."""
+        """Collecte une fois les flux Detoxio pour toutes les sources actives.
+
+        Returns:
+            Le résumé agrégé de cette collecte Serenicity.
+        """
         sources = self._load_active_sensor_sources()
         if not sources:
             LOGGER.info("Aucune source detoxio active à collecter")
@@ -75,27 +91,29 @@ class SerenicitySensorAttackCollectionService:
 
         for source in sources:
             current_state = self._load_scheduler_state(source)
-            before = datetime.now(UTC)
-            after = self._compute_after(before=before, current_state=current_state)
+            collection_window = build_collection_window(
+                before=datetime.now(UTC),
+                current_state=current_state,
+                safety_window_seconds=self._settings.poll_safety_window_seconds,
+            )
 
             LOGGER.info(
-                "Début de la collecte Detoxio pour %s. Fenêtre from=%s to=%s",
+                "Collecte Detoxio démarrée source=%s from=%s to=%s",
                 source.external_id,
-                after.isoformat(),
-                before.isoformat(),
+                collection_window.after.isoformat(),
+                collection_window.before.isoformat(),
             )
 
             try:
                 fetch_result = self._sensor_client.list_sensor_fluxes(
                     sensor_id=source.external_id,
-                    from_datetime=after,
-                    to_datetime=before,
-                    sort_desc=True,
+                    from_datetime=collection_window.after,
+                    to_datetime=collection_window.before,
                 )
                 source_inserted, source_ignored = self._persist_attacks(
                     source=source,
                     current_state=current_state,
-                    before=before,
+                    before=collection_window.before,
                     payloads=fetch_result.items,
                 )
             except Exception as exc:
@@ -105,8 +123,8 @@ class SerenicitySensorAttackCollectionService:
                     current_state=current_state,
                     error=exc,
                 )
-                LOGGER.error(
-                    "Échec de la collecte Detoxio pour %s : %s",
+                LOGGER.exception(
+                    "Collecte Detoxio en erreur source=%s: %s",
                     source.external_id,
                     exc,
                 )
@@ -119,12 +137,12 @@ class SerenicitySensorAttackCollectionService:
             attacks_ignored += source_ignored
 
             LOGGER.info(
-                "Collecte Detoxio terminée pour %s. lus=%s inserees=%s ignorees=%s pages=%s",
+                "Collecte Detoxio terminée source=%s pages=%s lus=%s inserees=%s ignorees=%s",
                 source.external_id,
+                fetch_result.pages_read,
                 len(fetch_result.items),
                 source_inserted,
                 source_ignored,
-                fetch_result.pages_read,
             )
 
         result = SerenicitySensorAttackCollectionResult(
@@ -137,7 +155,7 @@ class SerenicitySensorAttackCollectionService:
             attacks_ignored=attacks_ignored,
         )
         LOGGER.info(
-            "Collecte Detoxio terminée. sources=%s succes=%s erreurs=%s pages=%s lus=%s inserees=%s ignorees=%s",
+            "Collecte Detoxio terminée sources=%s succes=%s erreurs=%s pages=%s lus=%s inserees=%s ignorees=%s",
             result.sources_selected,
             result.sources_succeeded,
             result.source_errors,
@@ -149,6 +167,11 @@ class SerenicitySensorAttackCollectionService:
         return result
 
     def _load_active_sensor_sources(self) -> list[Source]:
+        """Charge les sources actives compatibles avec la collecte Detoxio.
+
+        Returns:
+            La liste des sources ``detoxio`` actives.
+        """
         with self._database.connection() as connection:
             source_repository = SourceRepository(connection)
             active_sources = source_repository.list_active()
@@ -156,26 +179,17 @@ class SerenicitySensorAttackCollectionService:
         return [source for source in active_sources if source.sensor_type_code == "detoxio"]
 
     def _load_scheduler_state(self, source: Source) -> SchedulerState | None:
+        """Charge l'état courant du scheduler pour une source.
+
+        Args:
+            source: Source dont il faut lire l'état.
+
+        Returns:
+            L'état courant ou ``None``.
+        """
         with self._database.connection() as connection:
             scheduler_state_repository = SchedulerStateRepository(connection)
             return scheduler_state_repository.get_by_source(source)
-
-    def _compute_after(
-        self,
-        *,
-        before: datetime,
-        current_state: SchedulerState | None,
-    ) -> datetime:
-        """Calcule la borne `from` à partir de `last_poll_at` et de la safety window."""
-        safety_window = timedelta(seconds=self._settings.poll_safety_window_seconds)
-
-        if current_state and current_state.last_poll_at:
-            return current_state.last_poll_at - safety_window
-        
-        after = (before - timedelta(hours=24)) - safety_window
-        if after > before:
-            after = before - safety_window
-        return after
 
     def _persist_attacks(
         self,
@@ -185,6 +199,17 @@ class SerenicitySensorAttackCollectionService:
         before: datetime,
         payloads: list[dict[str, object]],
     ) -> tuple[int, int]:
+        """Normalise puis insère les flux Serenicity d'une source.
+
+        Args:
+            source: Source collectée.
+            current_state: État courant de la source.
+            before: Fin de fenêtre collectée à mémoriser.
+            payloads: Flux bruts renvoyés par l'API.
+
+        Returns:
+            Un tuple ``(insérées, ignorées)``.
+        """
         success_timestamp = datetime.now(UTC)
         attacks_inserted = 0
         attacks_ignored = 0
@@ -200,8 +225,13 @@ class SerenicitySensorAttackCollectionService:
                         payload,
                         collected_at=success_timestamp,
                     )
-                except NormalizationError:
+                except NormalizationError as exc:
                     attacks_ignored += 1
+                    LOGGER.warning(
+                        "Flux Detoxio ignoré source=%s raison=%s",
+                        source.external_id,
+                        exc,
+                    )
                     continue
 
                 if attack is None:
@@ -213,13 +243,12 @@ class SerenicitySensorAttackCollectionService:
                 else:
                     attacks_ignored += 1
 
-            scheduler_state_repository.upsert(
-                source,
-                last_inventory_at=current_state.last_inventory_at if current_state else None,
-                last_poll_at=before,
-                last_success_at=success_timestamp,
-                last_error_at=None,
-                last_error_message=None,
+            persist_collection_success(
+                scheduler_state_repository,
+                source=source,
+                current_state=current_state,
+                before=before,
+                success_timestamp=success_timestamp,
             )
 
         return attacks_inserted, attacks_ignored
@@ -231,16 +260,21 @@ class SerenicitySensorAttackCollectionService:
         current_state: SchedulerState | None,
         error: Exception,
     ) -> None:
+        """Persistе un échec de collecte Detoxio dans ``scheduler_state``.
+
+        Args:
+            source: Source en erreur.
+            current_state: État courant connu.
+            error: Exception à historiser.
+        """
         try:
             with self._database.transaction() as connection:
                 scheduler_state_repository = SchedulerStateRepository(connection)
-                scheduler_state_repository.upsert(
-                    source,
-                    last_inventory_at=current_state.last_inventory_at if current_state else None,
-                    last_poll_at=current_state.last_poll_at if current_state else None,
-                    last_success_at=current_state.last_success_at if current_state else None,
-                    last_error_at=datetime.now(UTC),
-                    last_error_message=str(error)[:1000],
+                persist_collection_error(
+                    scheduler_state_repository,
+                    source=source,
+                    current_state=current_state,
+                    error=error,
                 )
         except Exception as exc:
             LOGGER.warning(

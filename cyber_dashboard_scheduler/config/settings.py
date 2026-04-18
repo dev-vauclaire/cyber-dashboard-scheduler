@@ -18,10 +18,22 @@ class ConfigurationError(ValueError):
 
 
 def _load_env_file() -> None:
+    """Charge le fichier ``.env`` du scheduler si présent."""
     load_dotenv(dotenv_path=ENV_FILE_PATH, override=False)
 
 
 def _require_env(name: str) -> str:
+    """Lit une variable d'environnement obligatoire non vide.
+
+    Args:
+        name: Nom de la variable à lire.
+
+    Returns:
+        La valeur nettoyée de la variable.
+
+    Raises:
+        ConfigurationError: Si la variable est absente ou vide.
+    """
     value = os.getenv(name)
     if value is None or not value.strip():
         raise ConfigurationError(
@@ -31,6 +43,17 @@ def _require_env(name: str) -> str:
 
 
 def _require_positive_int(name: str) -> int:
+    """Lit une variable d'environnement entière strictement positive.
+
+    Args:
+        name: Nom de la variable à lire.
+
+    Returns:
+        La valeur convertie en entier.
+
+    Raises:
+        ConfigurationError: Si la valeur est absente, invalide ou non positive.
+    """
     value = _require_env(name)
 
     try:
@@ -49,6 +72,17 @@ def _require_positive_int(name: str) -> int:
 
 
 def _require_log_level(name: str) -> str:
+    """Lit et valide un niveau de log autorisé.
+
+    Args:
+        name: Nom de la variable à lire.
+
+    Returns:
+        Le niveau de log normalisé en majuscules.
+
+    Raises:
+        ConfigurationError: Si le niveau demandé n'est pas supporté.
+    """
     value = _require_env(name).upper()
     if value not in VALID_LOG_LEVELS:
         allowed_values = ", ".join(sorted(VALID_LOG_LEVELS))
@@ -60,6 +94,18 @@ def _require_log_level(name: str) -> str:
 
 
 def _get_positive_float(name: str, default: float) -> float:
+    """Lit un flottant strictement positif avec valeur par défaut.
+
+    Args:
+        name: Nom de la variable à lire.
+        default: Valeur à utiliser si la variable est absente.
+
+    Returns:
+        La valeur configurée ou la valeur par défaut.
+
+    Raises:
+        ConfigurationError: Si la valeur fournie est invalide ou non positive.
+    """
     value = os.getenv(name)
     if value is None or not value.strip():
         return default
@@ -80,6 +126,18 @@ def _get_positive_float(name: str, default: float) -> float:
 
 
 def _get_positive_int(name: str, default: int) -> int:
+    """Lit un entier strictement positif avec valeur par défaut.
+
+    Args:
+        name: Nom de la variable à lire.
+        default: Valeur à utiliser si la variable est absente.
+
+    Returns:
+        La valeur configurée ou la valeur par défaut.
+
+    Raises:
+        ConfigurationError: Si la valeur fournie est invalide ou non positive.
+    """
     value = os.getenv(name)
     if value is None or not value.strip():
         return default
@@ -142,7 +200,14 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        """Construit la configuration à partir des variables d'environnement."""
+        """Construit la configuration à partir des variables d'environnement.
+
+        Returns:
+            La configuration complète du scheduler.
+
+        Raises:
+            ConfigurationError: Si une variable obligatoire est absente ou invalide.
+        """
         _load_env_file()
 
         return cls(

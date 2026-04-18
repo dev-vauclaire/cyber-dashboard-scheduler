@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 import hashlib
-from urllib.parse import urlencode
 
 import requests
+
+from cyber_dashboard_scheduler.utils import format_utc_datetime_for_api
 
 from .serenicity_base_client import ApiClientError
 
@@ -33,6 +34,21 @@ class OgoApiClient:
         site_name_or_id: str,
         timeout_seconds: float,
     ) -> None:
+        """Initialise le client HTTP OGO.
+
+        Args:
+            base_url: URL racine de l'API OGO.
+            username: Nom d'utilisateur utilisé dans les endpoints.
+            api_key: Clé d'API OGO.
+            site_name_or_id: Site OGO ciblé.
+            timeout_seconds: Timeout réseau appliqué à chaque requête.
+
+        Raises:
+            ValueError: Si le timeout fourni n'est pas strictement positif.
+        """
+        if timeout_seconds <= 0:
+            raise ValueError("Le timeout HTTP OGO doit être strictement positif")
+
         self._base_url = base_url.rstrip("/")
         self._username = username.strip()
         self._api_key = api_key
@@ -47,7 +63,18 @@ class OgoApiClient:
         after: datetime,
         before: datetime,
     ) -> OgoJournalFetchResult:
-        """Lit toutes les pages du journal OGO pour les événements SECURITY."""
+        """Lit toutes les pages du journal OGO pour les événements SECURITY.
+
+        Args:
+            after: Borne basse UTC incluse.
+            before: Borne haute UTC.
+
+        Returns:
+            Le résultat agrégé contenant toutes les pages lues.
+
+        Raises:
+            ApiClientError: Si un appel HTTP ou une page de réponse échoue.
+        """
         page_size = 20
         page_number = 1
         pages_read = 0
@@ -83,6 +110,18 @@ class OgoApiClient:
         )
 
     def _request_json(self, *, path: str, params: dict[str, Any]) -> Any:
+        """Exécute une requête GET OGO et retourne le JSON décodé.
+
+        Args:
+            path: Chemin relatif de l'endpoint.
+            params: Query params à transmettre.
+
+        Returns:
+            Le corps JSON décodé.
+
+        Raises:
+            ApiClientError: Si l'appel HTTP échoue ou si la réponse JSON est invalide.
+        """
         url = f"{self._base_url}{path}"
         try:
             response = self._session.get(
@@ -103,6 +142,17 @@ class OgoApiClient:
 
     @staticmethod
     def _parse_page_payload(payload: Any) -> dict[str, Any]:
+        """Valide la structure paginée de la réponse journal OGO.
+
+        Args:
+            payload: Corps JSON brut.
+
+        Returns:
+            Un dictionnaire homogène contenant les items et la pagination.
+
+        Raises:
+            ApiClientError: Si la structure de réponse est invalide.
+        """
         if not isinstance(payload, dict):
             raise ApiClientError("Format inattendu pour la réponse du journal OGO")
 
@@ -145,16 +195,44 @@ class OgoApiClient:
 
 
 def _generate_ogo_auth_token(endpoint: str, api_key: str) -> str:
+    """Construit le jeton d'authentification OGO pour un endpoint.
+
+    Args:
+        endpoint: Endpoint appelé.
+        api_key: Clé d'API OGO.
+
+    Returns:
+        Le hash MD5 attendu par OGO.
+    """
     raw = f"{endpoint}-{api_key}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 
 def _format_ogo_datetime(value: datetime) -> str:
-    normalized_value = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    return normalized_value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    """Formate une date UTC au format ISO 8601 attendu par OGO.
+
+    Args:
+        value: Date à formater.
+
+    Returns:
+        Une chaîne ISO 8601 suffixée par ``Z``.
+    """
+    return format_utc_datetime_for_api(value)
 
 
 def _parse_non_negative_int(value: Any, field_name: str) -> int:
+    """Valide un entier positif ou nul renvoyé par OGO.
+
+    Args:
+        value: Valeur brute à convertir.
+        field_name: Nom du champ concerné.
+
+    Returns:
+        La valeur convertie en entier.
+
+    Raises:
+        ApiClientError: Si la valeur est invalide ou négative.
+    """
     try:
         parsed_value = int(value)
     except (TypeError, ValueError) as exc:
@@ -177,6 +255,18 @@ def _is_empty_journal_payload(
     total_count: int,
     page_number: int,
 ) -> bool:
+    """Détecte les variantes de réponse vide du journal OGO.
+
+    Args:
+        payload: Corps JSON brut.
+        items: Champ ``items`` brut.
+        total_pages: Nombre total de pages annoncé.
+        total_count: Nombre total d'éléments annoncé.
+        page_number: Numéro de page courant annoncé.
+
+    Returns:
+        ``True`` si la réponse correspond à une page vide acceptable, sinon ``False``.
+    """
     status = payload.get("status")
     status_code = None
     if isinstance(status, dict) and status.get("code") is not None:
