@@ -36,9 +36,9 @@ def normalize_ogo_attack(
         source_external_id=source.external_id,
         source_event_id=_optional_source_event_id(payload, event),
         attacker_ip=require_ip(event.get("ip"), "event.ip"),
-        occured_at=normalize_datetime_to_utc(payload.get("date"), "date"),
+        occurred_at=normalize_datetime_to_utc(payload.get("date"), "date"),
         collected_at=normalize_collected_at(collected_at),
-        attack_type=optional_text(event.get("type")) or optional_text(payload.get("type")),
+        attack_type=None,  # OGO ne fournit pas de type d'attaque structuré
         raw_payload=copy_payload(payload),
     )
 
@@ -59,7 +59,7 @@ def normalize_serenicity_sensor_flux(
         source_external_id=source.external_id,
         source_event_id=_optional_source_event_id(payload),
         attacker_ip=require_ip(payload.get("ip1"), "ip1"),
-        occured_at=normalize_datetime_to_utc(payload.get("start_of_hour"), "start_of_hour"),
+        occurred_at=normalize_datetime_to_utc(payload.get("start_of_hour"), "start_of_hour"),
         collected_at=normalize_collected_at(collected_at),
         attack_type=optional_text(payload.get("protocol")),
         raw_payload=copy_payload(payload),
@@ -82,7 +82,7 @@ def normalize_lurio_report(
         source_external_id=source.external_id,
         source_event_id=_optional_source_event_id(payload, threat_payload),
         attacker_ip=require_ip(payload.get("ip"), "ip"),
-        occured_at=normalize_datetime_to_utc(payload.get("created_at"), "created_at"),
+        occurred_at=normalize_datetime_to_utc(payload.get("created_at"), "created_at"),
         collected_at=normalize_collected_at(collected_at),
         attack_type=optional_text(threat_payload.get("type")),
         raw_payload=copy_payload(payload),

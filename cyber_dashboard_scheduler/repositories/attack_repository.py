@@ -27,7 +27,7 @@ class AttackRepository:
         deduplication_id = _build_deduplication_id(
             source_id=source_id,
             attacker_ip=attack.attacker_ip,
-            occured_at=attack.occured_at,
+            occurred_at=attack.occurred_at,
         )
         query = """
             INSERT INTO attacks (
@@ -35,7 +35,7 @@ class AttackRepository:
                 source_id,
                 source_event_id,
                 attacker_ip,
-                occured_at,
+                occurred_at,
                 collected_at,
                 attack_type,
                 raw_payload,
@@ -50,7 +50,7 @@ class AttackRepository:
             source_id,
             attack.source_event_id,
             attack.attacker_ip,
-            to_database_timestamp(attack.occured_at),
+            to_database_timestamp(attack.occurred_at),
             to_database_timestamp(attack.collected_at),
             attack.attack_type,
             Jsonb(attack.raw_payload) if attack.raw_payload is not None else None,
@@ -98,18 +98,18 @@ def _build_deduplication_id(
     *,
     source_id: int,
     attacker_ip: str,
-    occured_at: datetime,
+    occurred_at: datetime,
 ) -> str:
     """Construit la clé idempotente alignée avec les règles d'unicité métier.
 
     Args:
         source_id: Identifiant interne de la source.
         attacker_ip: Adresse IP attaquante normalisée.
-        occured_at: Date métier de l'attaque.
+        occurred_at: Date métier de l'attaque.
 
     Returns:
         Un hash SHA-256 stable.
     """
-    occured_at_utc = ensure_utc_datetime(occured_at).isoformat()
-    digest = sha256(f"{source_id}|{attacker_ip}|{occured_at_utc}".encode("utf-8"))
+    occurred_at_utc = ensure_utc_datetime(occurred_at).isoformat()
+    digest = sha256(f"{source_id}|{attacker_ip}|{occurred_at_utc}".encode("utf-8"))
     return digest.hexdigest()

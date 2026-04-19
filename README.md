@@ -95,7 +95,7 @@ python3 -m cyber_dashboard_scheduler.main
 ## Gestion des doublons
 
 - Chaque attaque insérée reçoit un `deduplication_id`.
-- Cette clé est calculée à partir de `source_id`, `attacker_ip` et `occured_at` normalisé en UTC.
+- Cette clé est calculée à partir de `source_id`, `attacker_ip` et `occurred_at` normalisé en UTC.
 - L'insertion utilise `ON CONFLICT (deduplication_id) DO NOTHING`.
 - Une attaque possédant la même source et la même date de survenue est ignorée sans erreur.
 
@@ -121,7 +121,3 @@ cyber_dashboard_scheduler/
 - services : logique métier de collecte, normalisation et insertion
 - utils : fonctions utilitaires (ex: gestion du temps)
 - main.py : point d'entrée du scheduler
-
-## Tests
-
-Les tests unitaires du scheduler utilisent uniquement la bibliothèque standard `unittest`.

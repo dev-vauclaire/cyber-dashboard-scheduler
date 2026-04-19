@@ -15,7 +15,7 @@ class Attack:
     source_external_id: str
     source_event_id: str | None
     attacker_ip: str
-    occured_at: datetime
+    occurred_at: datetime
     collected_at: datetime
     attack_type: str | None
     raw_payload: dict[str, Any] | None
