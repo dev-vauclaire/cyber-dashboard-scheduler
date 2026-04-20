@@ -16,7 +16,7 @@ class SensorTypeRepository:
     def list_all(self) -> list[SensorType]:
         """Retourne tous les types de capteurs triés par identifiant."""
         query = """
-            SELECT id, code, label, category
+            SELECT id, code, label, category, color
             FROM sensor_types
             ORDER BY id
         """
@@ -30,6 +30,7 @@ class SensorTypeRepository:
                 code=row["code"],
                 label=row["label"],
                 category=row["category"],
+                color=row["color"],
             )
             for row in rows
         ]

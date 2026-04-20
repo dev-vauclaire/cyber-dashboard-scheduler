@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from ipaddress import ip_address
 from typing import Any, Mapping
 
+from .color import require_hex_color
+
 
 class NormalizationError(ValueError):
     """Levée quand un payload externe ne peut pas être normalisé."""

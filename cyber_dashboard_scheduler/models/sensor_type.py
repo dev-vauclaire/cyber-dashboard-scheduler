@@ -13,3 +13,4 @@ class SensorType:
     code: str
     label: str
     category: str
+    color: str

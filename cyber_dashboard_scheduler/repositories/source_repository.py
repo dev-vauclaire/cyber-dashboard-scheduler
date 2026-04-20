@@ -22,7 +22,9 @@ class SourceRepository:
                 s.name,
                 s.latitude,
                 s.longitude,
-                s.is_active
+                s.is_active,
+                s.color
+
             FROM sources AS s
             INNER JOIN sensor_types AS st ON st.id = s.sensor_type_id
             WHERE s.is_active = TRUE
@@ -44,16 +46,18 @@ class SourceRepository:
                 name,
                 latitude,
                 longitude,
-                is_active
+                is_active,
+                color
             )
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (sensor_type_id, external_id)
             DO UPDATE SET
                 name = EXCLUDED.name,
                 latitude = EXCLUDED.latitude,
                 longitude = EXCLUDED.longitude,
-                is_active = EXCLUDED.is_active
-            RETURNING external_id, name, latitude, longitude, is_active
+                is_active = EXCLUDED.is_active,
+                color = sources.color
+            RETURNING external_id, name, latitude, longitude, is_active, color
         """
         params = (
             sensor_type_id,
@@ -62,6 +66,7 @@ class SourceRepository:
             source.latitude,
             source.longitude,
             source.is_active,
+            source.color,
         )
         with self._connection.cursor() as cursor:
             cursor.execute(query, params)
@@ -77,6 +82,7 @@ class SourceRepository:
             latitude=row["latitude"],
             longitude=row["longitude"],
             is_active=row["is_active"],
+            color=row["color"],
         )
 
     def _resolve_sensor_type_id(self, sensor_type_code: str) -> int:
@@ -109,4 +115,5 @@ class SourceRepository:
             latitude=row["latitude"],
             longitude=row["longitude"],
             is_active=row["is_active"],
+            color=row["color"],
         )

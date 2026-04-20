@@ -64,7 +64,8 @@ class SourceInventoryService:
         """Exécute un inventaire complet des sources une seule fois."""
         inventory_timestamp = datetime.now(UTC)
         result = InventoryRunResult()
-        supported_sensor_types = self._load_supported_sensor_type_codes()
+        supported_sensor_type_colors = self._load_supported_sensor_type_colors()
+        supported_sensor_types = set(supported_sensor_type_colors)
         active_sources_before_inventory = self._load_active_sources_before_inventory(
             supported_sensor_types
         )
@@ -77,19 +78,19 @@ class SourceInventoryService:
         )
 
         self._inventory_ogo_waf(
-            supported_sensor_types=supported_sensor_types,
+            supported_sensor_type_colors=supported_sensor_type_colors,
             inventory_timestamp=inventory_timestamp,
             result=result,
             seen_source_keys=seen_source_keys,
         )
         self._inventory_lurios(
-            supported_sensor_types=supported_sensor_types,
+            supported_sensor_type_colors=supported_sensor_type_colors,
             inventory_timestamp=inventory_timestamp,
             result=result,
             seen_source_keys=seen_source_keys,
         )
         self._inventory_sensors(
-            supported_sensor_types=supported_sensor_types,
+            supported_sensor_type_colors=supported_sensor_type_colors,
             inventory_timestamp=inventory_timestamp,
             result=result,
             seen_source_keys=seen_source_keys,
@@ -111,15 +112,17 @@ class SourceInventoryService:
         )
         return result
 
-    def _load_supported_sensor_type_codes(self) -> set[str]:
-        """Charge la liste des types de capteurs connus en base.
+    def _load_supported_sensor_type_colors(self) -> dict[str, str]:
+        """Charge la liste des types de capteurs et leurs couleurs.
 
         Returns:
-            L'ensemble des codes de capteurs supportés.
+            Un mapping ``code -> couleur`` pour les capteurs supportés.
         """
         with self._database.connection() as connection:
             repository = SensorTypeRepository(connection)
-            return {sensor_type.code for sensor_type in repository.list_all()}
+            return {
+                sensor_type.code: sensor_type.color for sensor_type in repository.list_all()
+            }
 
     def _load_active_sources_before_inventory(
         self,
@@ -144,7 +147,7 @@ class SourceInventoryService:
     def _inventory_ogo_waf(
         self,
         *,
-        supported_sensor_types: set[str],
+        supported_sensor_type_colors: Mapping[str, str],
         inventory_timestamp: datetime,
         result: InventoryRunResult,
         seen_source_keys: set[SourceKey],
@@ -152,17 +155,20 @@ class SourceInventoryService:
         """Inventorie la source OGO/WAF issue de la configuration locale.
 
         Args:
-            supported_sensor_types: Types de capteurs connus en base.
+            supported_sensor_type_colors: Types de capteurs et couleurs connus en base.
             inventory_timestamp: Horodatage UTC de l'inventaire.
             result: Agrégat de résultat à enrichir.
             seen_source_keys: Clés de sources vues pendant l'inventaire.
         """
-        if "waf" not in supported_sensor_types:
+        if "waf" not in supported_sensor_type_colors:
             LOGGER.info("Type waf absent de sensor_types, source OGO/WAF ignorée")
             return
 
         LOGGER.info("Création de la source OGO/WAF à partir de la configuration locale")
-        source = normalize_ogo_waf_source(self._settings.ogo.site_name_or_id)
+        source = normalize_ogo_waf_source(
+            self._settings.ogo.site_name_or_id,
+            supported_sensor_type_colors["waf"],
+        )
         result.endpoints_called.append("local:ogo_waf")
         result.sources_detected += 1
         seen_source_keys.add(_build_source_key(source))
@@ -176,7 +182,7 @@ class SourceInventoryService:
     def _inventory_lurios(
         self,
         *,
-        supported_sensor_types: set[str],
+        supported_sensor_type_colors: Mapping[str, str],
         inventory_timestamp: datetime,
         result: InventoryRunResult,
         seen_source_keys: set[SourceKey],
@@ -184,12 +190,12 @@ class SourceInventoryService:
         """Inventorie les lurios fournis par Serenicity.
 
         Args:
-            supported_sensor_types: Types de capteurs connus en base.
+            supported_sensor_type_colors: Types de capteurs et couleurs connus en base.
             inventory_timestamp: Horodatage UTC de l'inventaire.
             result: Agrégat de résultat à enrichir.
             seen_source_keys: Clés de sources vues pendant l'inventaire.
         """
-        if "lurio" not in supported_sensor_types:
+        if "lurio" not in supported_sensor_type_colors:
             LOGGER.info("Type lurio absent de sensor_types, appel /api/v1/lurios ignoré")
             return
 
@@ -205,8 +211,11 @@ class SourceInventoryService:
         LOGGER.info("%s lurios récupérés depuis Serenicity", len(payloads))
         self._process_payloads(
             payloads=payloads,
-            normalizer=normalize_lurio_source,
-            supported_sensor_types=supported_sensor_types,
+            normalizer=lambda payload: normalize_lurio_source(
+                payload,
+                supported_sensor_type_colors["lurio"],
+            ),
+            supported_sensor_types=set(supported_sensor_type_colors),
             inventory_timestamp=inventory_timestamp,
             result=result,
             origin="Lurio",
@@ -216,7 +225,7 @@ class SourceInventoryService:
     def _inventory_sensors(
         self,
         *,
-        supported_sensor_types: set[str],
+        supported_sensor_type_colors: Mapping[str, str],
         inventory_timestamp: datetime,
         result: InventoryRunResult,
         seen_source_keys: set[SourceKey],
@@ -224,12 +233,12 @@ class SourceInventoryService:
         """Inventorie les capteurs Serenicity.
 
         Args:
-            supported_sensor_types: Types de capteurs connus en base.
+            supported_sensor_type_colors: Types de capteurs et couleurs connus en base.
             inventory_timestamp: Horodatage UTC de l'inventaire.
             result: Agrégat de résultat à enrichir.
             seen_source_keys: Clés de sources vues pendant l'inventaire.
         """
-        if not supported_sensor_types or "detoxio" not in supported_sensor_types:
+        if not supported_sensor_type_colors or "detoxio" not in supported_sensor_type_colors:
             LOGGER.info("Aucun type Serenicity supporté dans sensor_types, appel /api/v1/sensors ignoré")
             return
 
@@ -245,8 +254,11 @@ class SourceInventoryService:
         LOGGER.info("%s capteurs Serenicity récupérés", len(payloads))
         self._process_payloads(
             payloads=payloads,
-            normalizer=normalize_serenicity_sensor,
-            supported_sensor_types=supported_sensor_types,
+            normalizer=lambda payload: normalize_serenicity_sensor(
+                payload,
+                supported_sensor_type_colors,
+            ),
+            supported_sensor_types=set(supported_sensor_type_colors),
             inventory_timestamp=inventory_timestamp,
             result=result,
             origin="Serenicity",
@@ -403,6 +415,7 @@ class SourceInventoryService:
                 latitude=source.latitude,
                 longitude=source.longitude,
                 is_active=False,
+                color=source.color,
             )
             try:
                 with self._database.transaction() as connection:

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import sys
 from types import ModuleType
 import unittest
+from unittest.mock import patch
 
 dotenv_stub = ModuleType("dotenv")
 dotenv_stub.load_dotenv = lambda *args, **kwargs: None
@@ -35,6 +36,7 @@ from cyber_dashboard_scheduler.services.attack_normalization import (
 )
 from cyber_dashboard_scheduler.services.source_normalization import (
     normalize_lurio_source,
+    normalize_serenicity_sensor,
 )
 
 
@@ -49,6 +51,7 @@ class AttackNormalizationTestCase(unittest.TestCase):
             latitude=None,
             longitude=None,
             is_active=True,
+            color="#336699",
         )
 
         attack = normalize_ogo_attack(
@@ -71,6 +74,7 @@ class AttackNormalizationTestCase(unittest.TestCase):
             latitude=None,
             longitude=None,
             is_active=True,
+            color="#336699",
         )
 
         attack = normalize_serenicity_sensor_flux(
@@ -98,19 +102,43 @@ class SourceNormalizationTestCase(unittest.TestCase):
     """Valide les règles minimales de normalisation des sources."""
 
     def test_normalize_lurio_source_marks_connected_source_as_active(self) -> None:
-        source = normalize_lurio_source(
-            {
-                "id": "lurio-1",
-                "name": "Lurio Paris",
-                "status": "CONNECTED",
-                "latitude": "48.8566",
-                "longitude": "2.3522",
-            }
-        )
+        with patch(
+            "cyber_dashboard_scheduler.services.source_normalization.derive_color_random",
+            return_value="#ABCDEF",
+        ):
+            source = normalize_lurio_source(
+                {
+                    "id": "lurio-1",
+                    "name": "Lurio Paris",
+                    "status": "CONNECTED",
+                    "latitude": "48.8566",
+                    "longitude": "2.3522",
+                },
+                "#123456",
+            )
 
         self.assertEqual(source.sensor_type_code, "lurio")
         self.assertEqual(source.external_id, "lurio-1")
         self.assertTrue(source.is_active)
+        self.assertEqual(source.color, "#ABCDEF")
+
+    def test_normalize_serenicity_sensor_derives_color_from_sensor_type(self) -> None:
+        with patch(
+            "cyber_dashboard_scheduler.services.source_normalization.derive_color_random",
+            return_value="#FEDCBA",
+        ):
+            source = normalize_serenicity_sensor(
+                {
+                    "id": "sensor-1",
+                    "type_fk": "detoxio",
+                    "name": "Detoxio Paris",
+                    "status": "ACTIVE",
+                },
+                {"detoxio": "#336699"},
+            )
+
+        self.assertEqual(source.sensor_type_code, "detoxio")
+        self.assertEqual(source.color, "#FEDCBA")
 
 
 if __name__ == "__main__":

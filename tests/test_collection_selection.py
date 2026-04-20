@@ -66,9 +66,9 @@ class CollectorSelectionTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.database = _FakeDatabase()
         self.sources = [
-            Source("detoxio", "sensor-1", "Sensor 1", None, None, True),
-            Source("lurio", "lurio-1", "Lurio 1", None, None, True),
-            Source("waf", "ogo-site", "OGO Site", None, None, True),
+            Source("detoxio", "sensor-1", "Sensor 1", None, None, True, "#336699"),
+            Source("lurio", "lurio-1", "Lurio 1", None, None, True, "#993366"),
+            Source("waf", "ogo-site", "OGO Site", None, None, True, "#669933"),
         ]
         _FakeSourceRepository.active_sources = self.sources
 

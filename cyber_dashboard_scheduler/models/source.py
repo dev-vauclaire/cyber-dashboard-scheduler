@@ -15,3 +15,4 @@ class Source:
     latitude: float | None
     longitude: float | None
     is_active: bool
+    color: str

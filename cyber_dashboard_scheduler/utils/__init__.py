@@ -1,5 +1,6 @@
 """Package des utilitaires partagés."""
 
+from .color import derive_color_random, normalize_hex_color, require_hex_color
 from .datetime import (
     ensure_utc_datetime,
     format_utc_datetime_for_api,
@@ -26,11 +27,14 @@ __all__ = [
     "ensure_utc_datetime",
     "format_utc_datetime_for_api",
     "from_database_timestamp",
+    "derive_color_random",
+    "normalize_hex_color",
     "normalize_collected_at",
     "normalize_datetime_to_utc",
     "optional_float",
     "optional_text",
     "require_identifier",
+    "require_hex_color",
     "require_ip",
     "require_mapping",
     "require_text",
