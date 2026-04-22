@@ -13,3 +13,4 @@ env/
 htmlcov/
 .DS_Store
 api.md
+tests/

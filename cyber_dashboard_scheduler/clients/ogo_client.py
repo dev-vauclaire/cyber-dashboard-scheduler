@@ -75,8 +75,8 @@ class OgoApiClient:
         Raises:
             ApiClientError: Si un appel HTTP ou une page de réponse échoue.
         """
-        page_size = 20
-        page_number = 1
+        page_size = 0
+        page_number = 0
         pages_read = 0
         items: list[dict[str, Any]] = []
         total_count = 0
@@ -181,7 +181,7 @@ class OgoApiClient:
         if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
             raise ApiClientError("Format inattendu pour le champ items du journal OGO")
         
-        if total_pages <= 0 or page_number <= 0:
+        if total_pages <= 0 or page_number < 0:
             raise ApiClientError(
                 "La pagination du journal OGO est invalide pour une réponse non vide"
             )
