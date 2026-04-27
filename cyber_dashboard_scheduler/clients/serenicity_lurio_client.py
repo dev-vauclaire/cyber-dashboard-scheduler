@@ -9,6 +9,9 @@ from typing import Any
 from .serenicity_base_client import ApiClientError, SerenicityBaseClient
 
 
+LURIO_REPORTS_PER_PAGE = 100
+
+
 @dataclass(frozen=True, slots=True)
 class SerenicityLurioReportFetchResult:
     """Résultat agrégé d'une lecture paginée de reports Lurio."""
@@ -65,6 +68,7 @@ class SerenicityLurioClient(SerenicityBaseClient):
                     "from": self._format_datetime(from_datetime),
                     "to": self._format_datetime(to_datetime),
                     "page": page_number,
+                    "per_page": LURIO_REPORTS_PER_PAGE,
                 },
             )
             parsed_page = self._parse_report_page_payload(payload)

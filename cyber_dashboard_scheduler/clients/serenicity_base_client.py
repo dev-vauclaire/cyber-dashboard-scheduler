@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from cyber_dashboard_scheduler.utils import format_utc_datetime_for_api
+
+
+LOGGER = logging.getLogger(__name__)
+SERENICITY_HTTP_RETRY_COUNT = 2
+SERENICITY_HTTP_RETRY_BACKOFF_SECONDS = 0.5
 
 
 class ApiClientError(RuntimeError):
@@ -32,14 +40,9 @@ class SerenicityBaseClient:
             raise ValueError("Le timeout HTTP Serenicity doit être strictement positif")
 
         self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
         self._timeout_seconds = timeout_seconds
-        self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "Accept": "application/json",
-                "Authorization": f"Api-Key {api_key}",
-            }
-        )
+        self._session = self._build_session()
 
     def _request_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         """Exécute une requête GET Serenicity et retourne le JSON décodé.
@@ -59,6 +62,7 @@ class SerenicityBaseClient:
             response = self._session.get(url, params=params, timeout=self._timeout_seconds)
             response.raise_for_status()
         except requests.RequestException as exc:
+            self._reset_session_after_failure()
             raise ApiClientError(f"Échec de l'appel API Serenicity {url}: {exc}") from exc
 
         try:
@@ -67,6 +71,43 @@ class SerenicityBaseClient:
             raise ApiClientError(
                 f"Réponse JSON invalide pour l'appel API Serenicity {url}"
             ) from exc
+
+    def _build_session(self) -> requests.Session:
+        """Construit une session HTTP Serenicity avec retry sur les GET idempotents."""
+        session = requests.Session()
+        session.headers.update(
+            {
+                "Accept": "application/json",
+                "Authorization": f"Api-Key {self._api_key}",
+                "Connection": "close",
+            }
+        )
+        retry_policy = Retry(
+            total=SERENICITY_HTTP_RETRY_COUNT,
+            connect=SERENICITY_HTTP_RETRY_COUNT,
+            read=SERENICITY_HTTP_RETRY_COUNT,
+            status=SERENICITY_HTTP_RETRY_COUNT,
+            backoff_factor=SERENICITY_HTTP_RETRY_BACKOFF_SECONDS,
+            allowed_methods=frozenset({"GET"}),
+            status_forcelist=(429, 500, 502, 503, 504),
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry_policy)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        return session
+
+    def _reset_session_after_failure(self) -> None:
+        """Écarte le pool HTTP courant après un échec réseau Serenicity."""
+        previous_session = self._session
+        self._session = self._build_session()
+        try:
+            previous_session.close()
+        except requests.RequestException as exc:
+            LOGGER.debug(
+                "Fermeture de session Serenicity échouée après erreur HTTP : %s",
+                exc,
+            )
 
     @staticmethod
     def _format_datetime(value: datetime) -> str:
