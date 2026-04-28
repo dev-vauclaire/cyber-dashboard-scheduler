@@ -19,7 +19,7 @@ from .serenicity_base_client import (
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_LURIO_PAGE_DELAY_SECONDS = 0.5
-DEFAULT_LURIO_MAX_PAGES_PER_CYCLE = 700
+DEFAULT_LURIO_MAX_PAGES_PER_CYCLE = 80
 
 
 @dataclass(frozen=True, slots=True)
