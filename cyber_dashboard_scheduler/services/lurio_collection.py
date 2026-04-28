@@ -113,6 +113,8 @@ class LurioAttackCollectionService:
                     current_state=current_state,
                     before=collection_window.before,
                     payloads=fetch_result.items,
+                    collection_completed=fetch_result.is_complete,
+                    last_report_created_at=fetch_result.last_report_created_at,
                 )
             except Exception as exc:
                 source_errors += 1
@@ -196,6 +198,8 @@ class LurioAttackCollectionService:
         current_state: SchedulerState | None,
         before: datetime,
         payloads: list[dict[str, object]],
+        collection_completed: bool,
+        last_report_created_at: datetime | None,
     ) -> tuple[int, int]:
         """Normalise puis insère les reports Lurio d'une source.
 
@@ -204,6 +208,8 @@ class LurioAttackCollectionService:
             current_state: État courant de la source.
             before: Fin de fenêtre collectée à mémoriser.
             payloads: Reports bruts renvoyés par l'API.
+            collection_completed: Indique si toutes les pages ont été lues.
+            last_report_created_at: Date du dernier report reçu si la collecte est tronquée.
 
         Returns:
             Un tuple ``(insérées, ignorées)``.
@@ -241,12 +247,24 @@ class LurioAttackCollectionService:
                 else:
                     attacks_ignored += 1
 
-            persist_collection_success(
-                scheduler_state_repository,
-                source=source,
-                current_state=current_state,
-                before=before,
-                success_timestamp=success_timestamp,
+            poll_cursor = before if collection_completed else last_report_created_at
+            if poll_cursor is not None:
+                persist_collection_success(
+                    scheduler_state_repository,
+                    source=source,
+                    current_state=current_state,
+                    before=poll_cursor,
+                    success_timestamp=success_timestamp,
+                )
+
+        if not collection_completed:
+            LOGGER.warning(
+                (
+                    "Collecte Lurio incomplète pour source=%s: last_poll_at positionné sur "
+                    "le dernier created_at reçu=%s"
+                ),
+                source.external_id,
+                last_report_created_at.isoformat() if last_report_created_at else "inconnu",
             )
 
         return attacks_inserted, attacks_ignored
